@@ -59,7 +59,11 @@ async function forwardMedia(msg, targetChatId, caption) {
 bot.onText(/\/start/, async (msg) => {
   upsertUser(msg.from);
   clearState(msg.from.id);
-  await sendMain(msg.chat.id);
+  await bot.sendPhoto(msg.chat.id, 'image.png', {
+    caption: START_TEXT,
+    parse_mode: 'HTML',
+    ...mainMenu
+  });
 });
 
 // ═══════════════════════════════════════════════════════════
