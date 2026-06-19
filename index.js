@@ -28,7 +28,31 @@ console.log('ADMIN_IDS loaded:', ADMIN_IDS);
 const CHANNEL_USERNAME = 'KM_gameRU';          // без @
 const CHANNEL_LINK      = `https://t.me/${CHANNEL_USERNAME}`;
 
-const bot = new TelegramBot(TOKEN, { polling: true });
+const bot = new TelegramBot(TOKEN, {
+  polling: {
+    interval: 300,
+    autoStart: true,
+    params: {
+      timeout: 10
+    }
+  }
+});
+
+// Защита от повторной обработки одного и того же апдейта
+// (на случай дублирования long-polling сессий Telegram)
+const processedUpdates = new Set();
+const MAX_PROCESSED_CACHE = 500;
+
+function isDuplicateUpdate(key) {
+  if (key == null) return false;
+  if (processedUpdates.has(key)) return true;
+  processedUpdates.add(key);
+  if (processedUpdates.size > MAX_PROCESSED_CACHE) {
+    const first = processedUpdates.values().next().value;
+    processedUpdates.delete(first);
+  }
+  return false;
+}
 
 const userStates  = {};
 const adminToUser = {}; // adminId  -> { ticketId, userChatId }
@@ -78,12 +102,20 @@ async function sendSubscribeRequest(chatId) {
 
 async function sendMain(chatId) {
   const photoPath = path.join(__dirname, 'image.png');
-  if (fs.existsSync(photoPath)) {
-    return bot.sendPhoto(chatId, photoPath, {
-      caption: START_TEXT,
-      parse_mode: 'HTML',
-      ...mainMenu
-    });
+  const exists = fs.existsSync(photoPath);
+  console.log(`[sendMain] __dirname=${__dirname} photoPath=${photoPath} exists=${exists}`);
+
+  if (exists) {
+    try {
+      return await bot.sendPhoto(chatId, photoPath, {
+        caption: START_TEXT,
+        parse_mode: 'HTML',
+        ...mainMenu
+      });
+    } catch (e) {
+      console.error('[sendMain] sendPhoto failed:', e.message);
+      // если отправка фото не удалась — fallback на текст, чтобы юзер не остался без ответа
+    }
   }
   return bot.sendMessage(chatId, START_TEXT, { parse_mode: 'HTML', ...mainMenu });
 }
@@ -104,6 +136,8 @@ async function forwardMedia(msg, targetChatId, caption) {
 //  /start
 // ═══════════════════════════════════════════════════════════
 bot.onText(/\/start/, async (msg) => {
+  if (isDuplicateUpdate(`msg_${msg.chat.id}_${msg.message_id}`)) return;
+
   upsertUser(msg.from);
   clearState(msg.from.id);
 
@@ -119,6 +153,7 @@ bot.onText(/\/start/, async (msg) => {
 //  /admin
 // ═══════════════════════════════════════════════════════════
 bot.onText(/\/admin/, async (msg) => {
+  if (isDuplicateUpdate(`msg_${msg.chat.id}_${msg.message_id}`)) return;
   if (!isAdmin(msg.from.id)) return;
   await bot.sendMessage(msg.chat.id, '🛡️ <b>Панель администратора</b>', {
     parse_mode: 'HTML', ...adminPanelMenu()
@@ -130,6 +165,7 @@ bot.onText(/\/admin/, async (msg) => {
 // ═══════════════════════════════════════════════════════════
 bot.on('message', async (msg) => {
   if (msg.via_bot) return;
+  if (isDuplicateUpdate(`msg_${msg.chat.id}_${msg.message_id}`)) return;
 
   const chatId   = msg.chat.id;
   const userId   = Number(msg.from.id);
@@ -345,6 +381,8 @@ async function handleStep(msg, state, chatId, userId, text) {
 //  Callback Query
 // ═══════════════════════════════════════════════════════════
 bot.on('callback_query', async (query) => {
+  if (isDuplicateUpdate(`cb_${query.id}`)) return;
+
   const chatId = query.message.chat.id;
   const userId = Number(query.from.id);
   const data   = query.data;
