@@ -136,7 +136,7 @@ async function forwardMedia(msg, targetChatId, caption) {
 //  /start
 // ═══════════════════════════════════════════════════════════
 bot.onText(/\/start/, async (msg) => {
-  if (isDuplicateUpdate(`msg_${msg.chat.id}_${msg.message_id}`)) return;
+  if (isDuplicateUpdate(`start_${msg.chat.id}_${msg.message_id}`)) return;
 
   upsertUser(msg.from);
   clearState(msg.from.id);
@@ -153,7 +153,7 @@ bot.onText(/\/start/, async (msg) => {
 //  /admin
 // ═══════════════════════════════════════════════════════════
 bot.onText(/\/admin/, async (msg) => {
-  if (isDuplicateUpdate(`msg_${msg.chat.id}_${msg.message_id}`)) return;
+  if (isDuplicateUpdate(`admin_${msg.chat.id}_${msg.message_id}`)) return;
   if (!isAdmin(msg.from.id)) return;
   await bot.sendMessage(msg.chat.id, '🛡️ <b>Панель администратора</b>', {
     parse_mode: 'HTML', ...adminPanelMenu()
