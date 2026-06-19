@@ -1,4 +1,6 @@
 require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
 const TelegramBot = require('node-telegram-bot-api');
 const {
   initDB, upsertUser, getUser,
@@ -75,6 +77,14 @@ async function sendSubscribeRequest(chatId) {
 }
 
 async function sendMain(chatId) {
+  const photoPath = path.join(__dirname, 'image.png');
+  if (fs.existsSync(photoPath)) {
+    return bot.sendPhoto(chatId, photoPath, {
+      caption: START_TEXT,
+      parse_mode: 'HTML',
+      ...mainMenu
+    });
+  }
   return bot.sendMessage(chatId, START_TEXT, { parse_mode: 'HTML', ...mainMenu });
 }
 
@@ -125,6 +135,9 @@ bot.on('message', async (msg) => {
   const userId   = Number(msg.from.id);
   const text     = msg.text || '';
   const hasMedia = !!(msg.photo||msg.document||msg.video||msg.audio||msg.voice||msg.sticker);
+
+  // Команды обрабатываются отдельными bot.onText — не дублируем их здесь
+  if (text.startsWith('/start') || text.startsWith('/admin')) return;
 
   upsertUser(msg.from);
 
