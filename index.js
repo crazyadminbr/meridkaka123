@@ -22,6 +22,10 @@ const ADMIN_IDS = (process.env.ADMIN_IDS || '')
 
 console.log('ADMIN_IDS loaded:', ADMIN_IDS);
 
+// ── Обязательная подписка на канал ────────────────────────────
+const CHANNEL_USERNAME = 'KM_gameRU';          // без @
+const CHANNEL_LINK      = `https://t.me/${CHANNEL_USERNAME}`;
+
 const bot = new TelegramBot(TOKEN, { polling: true });
 
 const userStates  = {};
@@ -36,6 +40,39 @@ function isAdmin(id) {
 function setState(id, s) { userStates[Number(id)] = s; }
 function getState(id)    { return userStates[Number(id)] || {}; }
 function clearState(id)  { delete userStates[Number(id)]; }
+
+// Проверка подписки пользователя на канал
+async function isSubscribed(userId) {
+  if (isAdmin(userId)) return true; // админам подписка не нужна
+  try {
+    const member = await bot.getChatMember(`@${CHANNEL_USERNAME}`, userId);
+    return ['creator', 'administrator', 'member'].includes(member.status);
+  } catch (e) {
+    console.error('Subscription check error:', e.message);
+    // Если бот не может проверить (не админ канала, неверный username и т.п.)
+    // лучше пропустить пользователя, чем заблокировать всех из-за ошибки конфигурации
+    return true;
+  }
+}
+
+const subscribeKeyboard = {
+  reply_markup: {
+    inline_keyboard: [
+      [{ text: '📢 Подписаться на канал', url: CHANNEL_LINK }],
+      [{ text: '✅ Я подписался', callback_data: 'check_subscription' }]
+    ]
+  }
+};
+
+async function sendSubscribeRequest(chatId) {
+  await bot.sendMessage(chatId,
+    `🔒 <b>Доступ ограничен</b>\n\n` +
+    `Для использования бота нужно подписаться на наш официальный канал:\n` +
+    `👉 <b>@${CHANNEL_USERNAME}</b>\n\n` +
+    `После подписки нажмите кнопку «✅ Я подписался» ниже.`,
+    { parse_mode: 'HTML', ...subscribeKeyboard }
+  );
+}
 
 async function sendMain(chatId) {
   return bot.sendMessage(chatId, START_TEXT, { parse_mode: 'HTML', ...mainMenu });
@@ -59,11 +96,13 @@ async function forwardMedia(msg, targetChatId, caption) {
 bot.onText(/\/start/, async (msg) => {
   upsertUser(msg.from);
   clearState(msg.from.id);
-  await bot.sendPhoto(msg.chat.id, 'image.png', {
-    caption: START_TEXT,
-    parse_mode: 'HTML',
-    ...mainMenu
-  });
+
+  if (!(await isSubscribed(msg.from.id))) {
+    await sendSubscribeRequest(msg.chat.id);
+    return;
+  }
+
+  await sendMain(msg.chat.id);
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -88,6 +127,12 @@ bot.on('message', async (msg) => {
   const hasMedia = !!(msg.photo||msg.document||msg.video||msg.audio||msg.voice||msg.sticker);
 
   upsertUser(msg.from);
+
+  // ─── 0. Проверка подписки на канал ──────────────────────────
+  if (!(await isSubscribed(userId))) {
+    await sendSubscribeRequest(chatId);
+    return;
+  }
 
   // ─── 1. Контакт (телефон в резюме) ─────────────────────────
   if (msg.contact) {
@@ -296,6 +341,27 @@ bot.on('callback_query', async (query) => {
 
   // Отвечаем сразу чтобы убрать "часики"
   await bot.answerCallbackQuery(query.id).catch(() => {});
+
+  // ── Проверка подписки по кнопке "Я подписался" ─────────────
+  if (data === 'check_subscription') {
+    const subscribed = await isSubscribed(userId);
+    if (subscribed) {
+      try { await bot.deleteMessage(chatId, msgId); } catch (_) {}
+      await sendMain(chatId);
+    } else {
+      await bot.answerCallbackQuery(query.id, {
+        text: '❌ Вы ещё не подписались на канал',
+        show_alert: true
+      });
+    }
+    return;
+  }
+
+  // ── Общий гейт — без подписки дальше не пускаем ─────────────
+  if (!(await isSubscribed(userId))) {
+    await sendSubscribeRequest(chatId);
+    return;
+  }
 
   // ── Выбор должности ───────────────────────────────────────
   if (data.startsWith('pos_')) {
